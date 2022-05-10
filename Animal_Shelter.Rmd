@@ -1,0 +1,378 @@
+---
+title: "Animal_Shelter"
+output: html_document
+author: Clara Benlloch Coscollà
+date: 10/01/2021
+---
+  En este trabajo se realiza el estudio de una base de datos de animales en un refugio haciendo uso de las diferentes opciones y modelos de clasificación implementados en el paquete Caret. 
+  
+  Primeramente, se leen los datos, se estudian y se preparan para, posteriormente, entrenar varios modelos de clasificación supervisada. Se usan dos modelos: "ranger" de Random Forest y "mlp" de Redes Neuronales. Después, con el primero de los modelos se realiza una predicción con un set  de test de datos y finalmente se realiza una comparación entre los dos modelos utilizados. 
+
+```{r, message=FALSE,error=FALSE,warning=FALSE}
+# Cargo las bibliotecas a utilizar
+library(caret)
+library(mlbench)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(randomForest)
+library(e1071)
+library(tictoc)
+```
+
+  Como sets de train y test utilizo los que provee la misma página desde la que se ha obtenido la base de datos, "https://www.kaggle.com/c/shelter-animal-outcomes".
+  
+  Primeramente, analizo la base de datos que voy a utilizar en este proyecto: 
+  
+  Se trata de datos de un refugio de animales y el objetivo es, a partir de las diferentes características que describe el dataset, predecir donde van a acabar al salir del refugio.
+  Las columnas de la base de datos son las siguientes: 
+  
+  1. ID del animal.
+  2. Nombre.
+  3. Fecha en la que se registró en el refugio.
+  4. Resultado al salir el animal del refugio.
+  5. Información complementaria de la salida del refugio.
+  6. Tipo de animal.
+  7. Género del animal.
+  8. Edad del animal al salir del refugio.
+  9. Raza.
+  10. Color. 
+  
+  En primer lugar, vamos a quitar las primeras 3 columnas, ya que no aportan información relevante para la predicción.
+  
+  La clase, es decir, la variable a predecir es la cuarta columna, la cual está dividida en cuatro finales diferentes: transferencia del animal, adopción, eutanasia, muerte o devuelto al dueño. 
+  La quinta columna también la vamos a eliminar, ya que da información redundante con la cuarta. 
+```{r}
+Data_train <- read.csv("train.csv", stringsAsFactors=FALSE)
+
+Data_train <- select(Data_train,
+                     -AnimalID,
+                     -Name,
+                     -DateTime,
+                     -OutcomeSubtype,
+)
+
+```
+
+  A continuación, reviso los valores faltantes del dataset y compruebo que no los hay. 
+
+```{r}
+# Primero compruebo que no hay valores faltantes:
+any(is.na(Data_train)) 
+```
+  Después, compruebo cuantos tipos de datos diferentes hay almacenados en cada variable: 
+```{r, results='hold'}
+print("Tipos de salida: ")
+length(unique(Data_train$OutcomeType))
+unique(Data_train$OutcomeType)
+
+print("Tipo de animal: ")
+length(unique(Data_train$AnimalType))
+unique(Data_train$AnimalType)
+
+print("Género del animal: ")
+table(Data_train$SexuponOutcome)
+length(unique(Data_train$SexuponOutcome))
+
+print("Edad del animal a la salida: ")
+length(unique(Data_train$AgeuponOutcome))
+
+print("Raza del animal: ")
+length(unique(Data_train$Breed))
+
+
+print("Color del animal: ")
+length(unique(Data_train$Color))
+```
+
+  Después de visualizar de una manera resumida lo que contiene cada variable, pasamos a un pre-procesamiento de los datos que contiene el set de datos de "train" ofrecido por Kaggle. Vemos que nos quedan las variables de raza, color, género e esterilización o castración y edad. 
+  
+  Las dos primeras, de raza y color tienen mucha variación, que se intenta reducir. En cuanto a la raza, solo se determina si el animal es de una raza concreta o es una mezcla de razas, reduciendo así a dos posibilidades una columna con más de 1300 variantes de razas, como se ha visto en el apartado anterior. En cuanto al color, se intenta reducir los 366 colores que aparecen. En muchos casos aparecen dos colores, así que escogeremos el primero que aparezca de los dos en la serie de datos. Así conseguimos reducirlo a unos 20 valores para la variable. 
+  
+  Después, tenemos el sexo del animal junto con si ha habido esterilización o castración. En este caso, he decidido separar los datos en dos columnas, una para el sexo, con dos posibles valores "macho" o "hembra" y otra para la esterilización, con tres posibles valores: "Intacto", "Esterilizado" (comprendiendo también en esta variable si se trata de castración, en el caso que el animal sea macho) y "Desconocido", pues hay valores en los que aparece que este dato no se sabe. 
+  
+  Finalmente, en el caso de la edad, tal y como están los datos de la variable no se pueden cuantificar. Para solucionarlo, separo la variable en la cantidad de dias, semanas, años o meses (Un primer número), y una segunda parte, la palabra en sí de "dia/s", "semana/s", "mes/es" o "año/s". La segunda palabra la cambio por el número de dias correspondiente y lo multiplico por la primera cifra obtenida en esta variable. De esta manera se obtiene un avariable cuantitativa que expresa en días la edad del animal. Para hacer más fácil tratar con esta variable, también quiero obtener un valor binario así que consideraré como cachorros ("baby") todos los animales con una edad menor a un año (365 días) y un adulto ("adult") a todos los animales mayores a esa edad. 
+```{r}
+# Raza: si es o no una mezcla 
+Pura_o_no<- grepl("Mix", Data_train$Breed)
+Raza<-as.data.frame(Pura_o_no)
+Raza[Raza=="TRUE"]<-"Mix"
+Raza[Raza=="FALSE"]<-"One_breed"
+names(Raza)<-"Raza"
+Data_train[5]<-Raza
+
+
+# Color (Vamos a elegir el primer color que aparece para reducir los posibles colores)
+Color <- sapply(Data_train$Color, 
+                      function(x) strsplit(x, split = '/| ')[[1]][1])
+Color<-as.data.frame(Color)
+# nrow(unique(Color))
+Data_train[6]<-Color
+
+# Género
+# Como creo que puede ser importante tanto si el animal está esterilizado/castrado o no como si es macho o hembra, voy a dividirlo en dos columnas: 
+# (Puede pasar que se desconozcan los valores, en cuyo caso lo dejo como "Desconocido")
+Desconocido<- grepl("Unknown", Data_train$SexuponOutcome)
+Desconocido<-as.data.frame(Desconocido)
+Genero<- grepl("Male", Data_train$SexuponOutcome)
+Genero<-as.data.frame(Genero)
+Genero[Genero=="TRUE"]<-"Male"
+Genero[Genero=="FALSE"]<-"Female"
+Genero[Desconocido == "TRUE"]<-"Desconocido"
+
+
+Esterilizacion<-grepl("Intact", Data_train$SexuponOutcome)
+Esterilizacion<-as.data.frame(Esterilizacion)
+Esterilizacion[Esterilizacion=="TRUE"]<-"Intacto"
+Esterilizacion[Esterilizacion=="FALSE"]<-"Esterilizado"
+Esterilizacion[Desconocido == "TRUE"]<-"Desconocido"
+Data_train[3]<-Genero
+Data_train<-cbind(Data_train,Esterilizacion)
+
+# Edad (Divido en dos cada valor de la columna, paso todo a dias y multiplico)
+Edad_1 <- sapply(Data_train$AgeuponOutcome, 
+                      function(x) strsplit(x, split = '/| ')[[1]][1])
+Edad_1<-as.data.frame(as.numeric(Edad_1))
+
+Edad_2 <- sapply(Data_train$AgeuponOutcome, 
+                      function(x) strsplit(x, split = '/| ')[[1]][2])
+Edad_2[Edad_2=="year"]<-365
+Edad_2[Edad_2=="years"]<-365
+Edad_2[Edad_2=="month"]<-30
+Edad_2[Edad_2=="months"]<-30
+Edad_2[Edad_2=="week"]<-7
+Edad_2[Edad_2=="weeks"]<-7
+Edad_2[Edad_2=="day"]<-1
+Edad_2[Edad_2=="days"]<-1
+Edad_2<-as.data.frame(as.numeric(Edad_2))
+Edad<-Edad_1*Edad_2
+
+Edad[Edad < 365] <- "baby"
+Edad[Edad != "baby"] <- "adult"
+
+Data_train[4]<-Edad
+
+# No he conseguido dar por qué, pero al hacer estos cambios salen valores faltantes: 
+#
+Data_train$OutcomeType<-factor(Data_train$OutcomeType)
+Data_train$AnimalType<-factor(Data_train$AnimalType)
+Data_train$SexuponOutcome<-factor(Data_train$SexuponOutcome)
+Data_train$AgeuponOutcome<-factor(Data_train$AgeuponOutcome)
+Data_train$Breed<-factor(Data_train$Breed)
+Data_train$Color<-factor(Data_train$Color)
+Data_train$Esterilizacion<-factor(Data_train$Esterilizacion)
+Data_train<- na.omit(Data_train)
+```
+
+  Para observar mejor la relación entre la variable clase y alguna de las predictoras, realizo varios plots. En primer lugar vamos a observar las salidas que tienen los animales según son adultos o cachorros. 
+```{r}
+ggplot(Data_train[1:nrow(Data_train), ], aes(x = AgeuponOutcome, fill = OutcomeType)) + 
+  geom_bar(position = 'fill', colour = 'black') +
+  labs(y = 'Proportion', title = 'Animal Outcome: Babies versus Adults') +
+  theme_few()
+```
+
+  Como cabría esperar, los animales más pequeños tienen una mayor proporción de adopciones, aunque también de transferencias. Por suerte, la proporción de muertes y de animales sacrificados es muy baja en ambos casos. También, de los animales que se devuelven a sus dueños hay muchos más adultos que cachorros. Esto podría explicarse ya que, en general, la proporción de tiempo que una persona tiene un animal es con este mayor de un año, por tanto la mayoría de mascotas serán adultas y en consecuencia, si se pierden y se devuelven a sus dueños, serán mayoría perros y gatos adultos. 
+
+  Ahora, comparamos los animales que son mezclas de dos razas distintas con los que son de una raza específica: 
+```{r}
+ggplot(Data_train[1:nrow(Data_train), ], aes(x = Breed, fill = OutcomeType)) + 
+  geom_bar(position = 'fill', colour = 'black') +
+  labs(y = 'Proportion', title = 'Animal Outcome: Mixed Breed versus only one breed') +
+  theme_few()
+```
+
+  Las proporción de animales de una raza específica que son adoptados es ligeramente mayor a los que son de una mezcla de razas y, de igual manera, también es mayor la proporción de los que son devueltos a sus dueños. 
+
+  Por último, vamos a ver como afecta la esterilización en la adopción de estos perros y gatos: 
+
+```{r}
+ggplot(Data_train[1:nrow(Data_train), ], aes(x = Esterilizacion, fill = OutcomeType)) + 
+  geom_bar(position = 'fill', colour = 'black') +
+  labs(y = 'Proportion', title = 'Animal Outcome: Colors') +
+  theme_few()
+```
+
+  En esta gráfica, lo que más llama la atención es observar que la proporción de animales adoptados es mucho mayor si se sabe que están esterilizados. 
+
+  Seguidamente, aplicaremos el modelo de clasificación supervisada. He escogido la función "ranger", una implementación de Random Forest, el cual predice la clase juntando diferentes predicciones de árboles de decisión. Ranger es una implementación rápida de Random Forest, y puede ajustarse bien a los datos que tenemos, ya que contamos con un set de entrenamiento con más de 26 mil filas de datos.
+
+  La función "ranger" cuenta con tres parámetros para tunear: El primero "mtry", describe el número de variables que se separan en cada nodo. Por defecto es la raiz cuadrada del número de variables. Después, "splitrule" determina la regla de separación, las cuales pueden ser "gini", "extratrees" o "hellinger", actuando "gini" por defecto. Finalmente, "min.node.size", el cual determina el tamaño mínimo de un nodo y se establece en 1 por defecto para un modelo de clasificación. 
+
+  De momento, vamos a utilizar esta función con el valor por defecto de sus parámetros y la función trainControl, para validar el error utilizando un método de cross-validation con 10 hojas.
+```{r}
+tic()
+# Utilizamos trainControl para la validación del error. Realizamos la validacion cruzada de 10 hojas dos veces. 
+set.seed(123)
+Estim_error<-trainControl(method = "repeatedcv",repeats=2)
+#
+rf_Model<- train(OutcomeType~., data=Data_train, method="ranger", num.trees = 100, trControl = Estim_error)
+toc()
+# 
+rf_Model
+```
+  Con estos parámetros tenemos una Accurancy del 60% y un valor Kappa de 0.37. 
+
+  A continuación, utilizamos "tuneGrid" para tunear los diferentes parámetros de la función. 
+
+```{r}
+#
+tgrid <- expand.grid(.mtry= 4:6,
+                        .splitrule = "gini",
+                        .min.node.size = c(20,30)
+                        )
+# metric <- "Accuracy"
+#
+tic()
+#
+set.seed(123)
+Estim_error<-trainControl(method = "repeatedcv",repeats=2)
+#
+rf_Model2<- train(OutcomeType~., data=Data_train, method="ranger", num.trees = 100, trControl = Estim_error, tuneGrid = tgrid)
+toc()
+#
+rf_Model2
+```
+  Habiendo seleccionado los parámetros de "mtry" en un intervalo de 4 a 6, la "splitrule" en "gini" y el "min.node.size." de 20 a 30, el accurancy mejora un poco, a 61% y el parámetro kappa es más o menos igual al obtenido anteriormente, con un valor de 0.37. 
+
+  Teniendo el modelo entrenado por los datos del conjunto de entrenamiento, se va a utilizar el set de "test" de datos para predecir las salidas que tendrían un conjunto de animales del refugio basados en sus diferentes características. Voy a realizar el mismo proceso de preparación del dataset que he realizado para los datos de train, ahora para los de test y después se realiza la predicción con el primer modelo aprendido. 
+```{r}
+Data_test <- read.csv("test.csv", stringsAsFactors=FALSE)
+Data_test <- select(Data_test,
+                     -ID,
+                     -Name,
+                     -DateTime,
+)
+# Raza: si es o no una mezcla. 
+Pura_o_no<- grepl("Mix", Data_test$Breed)
+Raza<-as.data.frame(Pura_o_no)
+Raza[Raza=="TRUE"]<-"Mix"
+Raza[Raza=="FALSE"]<-"One_breed"
+names(Raza)<-"Raza"
+Data_test[4]<-Raza
+#
+# Color. 
+Color <- sapply(Data_test$Color, 
+                      function(x) strsplit(x, split = '/| ')[[1]][1])
+Color<-as.data.frame(Color)
+# nrow(unique(Color))
+Data_test[5]<-Color
+#
+# Género.
+Desconocido<- grepl("Unknown", Data_test$SexuponOutcome)
+Desconocido<-as.data.frame(Desconocido)
+Genero<- grepl("Male", Data_test$SexuponOutcome)
+Genero<-as.data.frame(Genero)
+Genero[Genero=="TRUE"]<-"Male"
+Genero[Genero=="FALSE"]<-"Female"
+Genero[Desconocido == "TRUE"]<-"Desconocido"
+#
+Esterilizacion<-grepl("Intact", Data_test$SexuponOutcome)
+Esterilizacion<-as.data.frame(Esterilizacion)
+Esterilizacion[Esterilizacion=="TRUE"]<-"Intacto"
+Esterilizacion[Esterilizacion=="FALSE"]<-"Esterilizado"
+Esterilizacion[Desconocido == "TRUE"]<-"Desconocido"
+Data_test[2]<-Genero
+Data_test<-cbind(Data_test,Esterilizacion)
+#
+# Edad (Divido en dos cada valor de la columna, paso todo a dias y multiplico)
+Edad_1 <- sapply(Data_test$AgeuponOutcome, 
+                      function(x) strsplit(x, split = '/| ')[[1]][1])
+Edad_1<-as.data.frame(as.numeric(Edad_1))
+
+Edad_2 <- sapply(Data_test$AgeuponOutcome, 
+                      function(x) strsplit(x, split = '/| ')[[1]][2])
+Edad_2[Edad_2=="year"]<-365
+Edad_2[Edad_2=="years"]<-365
+Edad_2[Edad_2=="month"]<-30
+Edad_2[Edad_2=="months"]<-30
+Edad_2[Edad_2=="week"]<-7
+Edad_2[Edad_2=="weeks"]<-7
+Edad_2[Edad_2=="day"]<-1
+Edad_2[Edad_2=="days"]<-1
+Edad_2<-as.data.frame(as.numeric(Edad_2))
+Edad<-Edad_1*Edad_2
+
+Edad[Edad < 365] <- "baby"
+Edad[Edad != "baby"] <- "adult"
+
+Data_test[3]<-Edad
+
+# No he conseguido dar por qué pero al hacer estos cambios salen valores faltantes: 
+Data_test$AnimalType<-factor(Data_test$AnimalType)
+Data_test$SexuponOutcome<-factor(Data_test$SexuponOutcome)
+Data_test$AgeuponOutcome<-factor(Data_test$AgeuponOutcome)
+Data_test$Breed<-factor(Data_test$Breed)
+Data_test$Color<-factor(Data_test$Color)
+Data_test$Esterilizacion<-factor(Data_test$Esterilizacion)
+Data_test<- na.omit(Data_test)
+
+# predict
+set.seed(123)
+Prediccion <- read.csv("sample_submission.csv", stringsAsFactors=FALSE, header = TRUE)
+plsProbs <- predict(rf_Model, newdata = Data_test, type = "raw")
+
+  Adopcion<-as.data.frame(as.numeric(grepl("Adoption", plsProbs[1:nrow(Data_test)])))
+  Fallecido<-as.data.frame(as.numeric(grepl("Died", plsProbs[1:nrow(Data_test)])))
+  Eutanasia<-as.data.frame(as.numeric(grepl("Euthanasia", plsProbs[1:nrow(Data_test)])))
+  Devuelto<-as.data.frame(as.numeric(grepl("Return_to_owner", plsProbs[1:nrow(Data_test)])))
+  Transferencia<-as.data.frame(as.numeric(grepl("Transfer", plsProbs[1:nrow(Data_test)])))
+  
+Prediccion[2]<-Adopcion
+Prediccion[3]<-Fallecido
+Prediccion[4]<-Eutanasia
+Prediccion[5]<-Devuelto
+Prediccion[6]<-Transferencia
+Suma1<-sum(Prediccion$Adoption)
+Suma2<-sum(Prediccion$Dead)
+Suma3<-sum(Prediccion$Euthanasia)
+Suma4<-sum(Prediccion$Return_to_owner)
+Suma5<-sum(Prediccion$Transfer)
+Suma<-c(Suma1,Suma2,Suma3,Suma4,Suma5)
+names(Suma)<-c("Adopción","Fallecido","Eutanasia","Devuelto","Transferencia")
+barplot(Suma)
+```
+  
+  En este gráfico de barras se muestran las predicciones con el modelo de Random Forest con el conjunto de datos de test que proporciona Kaggle. Como se puede observar, y como es lógico con los datos observados anteriormente, la mayoría de los animales son dados en adopción o, aunque en menor medida, transferidos. Una cantidad menor es devuelta a sus dueños y los menos serán sacrificados o fallecidos en el refugio. 
+
+  Por último, voy a realizar el estudio utilizando un nuevo modelo de clasificación. Voy a utilizar un modelo de Redes Neuronales llamado Multi-Layer Perceptron (mlp), el cual es un tipo de red neuronal formada por múltiples capas. 
+  
+  Utilizo aquí el parámetro "tuneLength", el cual calcula el algoritmo con varios valores para el pricipal parámetro. En este caso el parámetro a tunear de "mlp" es "size". 
+```{r}
+tic()
+set.seed(123)
+Estim_error<-trainControl(method = "repeatedcv",repeats=2)
+#
+mlp_model<- train(OutcomeType~., data=Data_train, method="mlp", trControl = Estim_error, tuneLength = 3)
+toc()
+#
+mlp_model
+```
+En este modelo se obtiene una precisión del 60% y una kappa de approximadamente 0.38. 
+
+A continuación, voy a comparar ambos modelos. Con varias funciones que provee el paquete Caret primeramente se comparan el "Accuracy" y el valor "Kappa" en ambos modelos y, posteriormente, se calcula el p-valor.  Poniendo el umbral en 0.05, veremos si las diferencias entre ambos modelos son o no significativas. Adicionalmente, se hace una gráfica de BlandAltman para comparar ambos modelos de clasificación. En esta gráfica se representan las diferencias de las medidas realizadas entre ambos modelos, si la media de estos valores es próxima a cero, significa que los dos modelo dan valores similares. 
+
+En los resultados obtenidos, podemos ver las difernetes "Accuracy" y "Kappa" de ambos modelos en las dos primeras tablasllamando la función "summary()" y pasándole "resamples()". En estas tablas se puede apreciar que los dos modelos de clasificación tienen valores de "Accuracy" y "Kappa" muy similares. 
+
+Después, con la función "diff()" se pueden estudiar en qué medida estos algoritmos son diferentes entre si. En los resultados, se muestran dos matrices donde la diagonal inferior muestra el p-value para la hipótesis nula y la diagonal superior muestra la diferncia aproximada entre distribuciones. 
+
+Al establecer como hipótesis nula que ambos modelos son parecidos, se obtiene un p-value de 0,06325 y, como hemos establecido un umbral de 0.05, este p-value está por encima de este umbral así que no podemos rechazar la hipótesis nula y consideramos que los modelos "ranger" y "mlp" son iguales a la hora de calcular los valores. Además, la parte superior de la matriz calcula una diferencia muy baja, de 0.0027, entre ambos modelos, lo que refuerza la conclusión de aceptar la hipótesis nula. 
+
+En consecuencia con los valores obtenidos, en la gráfica de Bland Altman puede verse como las diferencias de precisión entre ambos modelos son próximas a cero. 
+```{r, results="hold"}
+resamps=resamples(list(ranger=rf_Model,mlp=mlp_model))
+summary(resamps)
+xyplot(resamps,what="BlandAltman")
+diffs<-diff(resamps)
+summary(diffs)
+```
+
+  En los resultados obtenidos, podemos ver las difernetes "Accuracy" y "Kappa" de ambos modelos en las dos primeras tablas llamando la función "summary()" y pasándole "resamples()". En estas tablas se puede apreciar que los dos modelos de clasificación tienen valores de "Accuracy" y "Kappa" muy similares. 
+
+  Después, con la función "diff()" se pueden estudiar en qué medida estos algoritmos son diferentes entre si. En los resultados, se muestran dos matrices donde la diagonal inferior muestra el p-value para la hipótesis nula y la diagonal superior muestra la diferncia aproximada entre ambas distribuciones. 
+
+  Al establecer como hipótesis nula que ambos modelos son parecidos, se obtiene un p-value de 0,06325 y, como hemos establecido un umbral de 0.05 y este p-value está por encima de este umbral, no rechazamos la hipótesis nula y consideramos que los modelos "ranger" y "mlp" son iguales a la hora de calcular los valores. Además, la parte superior de la matriz calcula una diferencia muy baja, de 0.0027, entre ambos modelos, lo que refuerza la conclusión de aceptar la hipótesis nula. 
+
+  Finalmente y en consonancia con los valores obtenidos, en la gráfica de Bland Altman puede verse como las diferencias de precisión entre ambos modelos son próximas a cero, reforzando la conclusión de que ambos modelos muy similares entre si. 
+
+
