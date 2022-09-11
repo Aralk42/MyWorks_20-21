@@ -1,0 +1,111 @@
+############################################################
+#
+#Clara_Benlloch.1.2.txt
+#
+########
+#
+#1. Definir baraja:
+#
+Cartas.1al7<-c(1:7)
+oros.10al12<-c(10,11,12)
+names(oros.10al12)=c("Oros.10","Oros.11","Oros.12")
+#
+copas.10al12<-c(10,11,12)
+names(copas.10al12)=c("Copas.10","Copas.11","Copas.12")
+#
+espadas.10al12<-c(10,11,12)
+names(espadas.10al12)=c("Espadas.10","Espadas.11","Espadas.12")
+#
+bastos.10al12<-c(10,11,12)
+names(bastos.10al12)=c("Bastos.10","Bastos.11","Bastos.12")
+#
+baraja<-c(Oros.=Cartas.1al7,oros.10al12,Copas.=Cartas.1al7,copas.10al12,Espadas.=Cartas.1al7,espadas.10al12,Bastos.=Cartas.1al7,bastos.10al12)
+#
+names(baraja[ 7])
+names(baraja[33])
+#
+#########
+# 2. Reparto:
+#
+set.seed(2012);Reparto<-c(sample(baraja,16,replace=FALSE))
+#
+A1<-Reparto[1:4];B1<-Reparto[5:8];A2<-Reparto[9:12];B2<-Reparto[13:16]
+names(A1)
+names(B1)
+names(A2)
+names(B2)
+#
+##########
+# 3.Puntos de cada jugador:
+#
+A1[which(A1>10)]<-10;B1[which(B1>10)]<-10;A2[which(A2>10)]<-10;B2[which(B2>10)]<-10
+juego.df<-data.frame(juego.A1=sum(A1),juego.B1=sum(B1),juego.A2=sum(A2),juego.B2=sum(B2));
+juego.df
+#
+##########
+# 4.Añadir columna:
+#
+Logic.A1<-(sum(A1)>=31);Logic.B1<-(sum(B1)>=31);Logic.A2<-(sum(A2)>=31);Logic.B2<-(sum(B2)>=31)
+LogicTotal<-(Logic.A1|Logic.B1|Logic.A2|Logic.B2)
+j<-data.frame(J=LogicTotal)
+juego.df<-cbind(juego.df,j);
+juego.df
+#
+##########
+# 5.Nuevos repartos (2013, 2014, 2015):
+#
+# Reparto 2:
+#
+set.seed(2013);Reparto2<-c(sample(baraja,16,replace=FALSE))
+A1<-Reparto2[1:4]
+B1<-Reparto2[5:8]
+A2<-Reparto2[9:12]
+B2<-Reparto2[13:16]
+A1[which(A1>10)]<-10;B1[which(B1>10)]<-10;A2[which(A2>10)]<-10;B2[which(B2>10)]<-10
+Logic.A1<-(sum(A1)>=31)
+Logic.B1<-(sum(B1)>=31)
+Logic.A2<-(sum(A2)>=31)
+Logic.B2<-(sum(B2)>=31)
+LogicTotal<-(Logic.A1|Logic.B1|Logic.A2|Logic.B2)
+#
+juego2<-data.frame(juego.A1=sum(A1),juego.B1=sum(B1),juego.A2=sum(A2),juego.B2=sum(B2),J=LogicTotal)
+juego.df<-rbind.data.frame(juego.df,juego2)
+#
+# Reparto 3:
+#
+set.seed(2014);Reparto3<-c(sample(baraja,16,replace=FALSE))
+A1<-Reparto3[1:4]
+B1<-Reparto3[5:8]
+A2<-Reparto3[9:12]
+B2<-Reparto3[13:16]
+A1[which(A1>10)]<-10;B1[which(B1>10)]<-10;A2[which(A2>10)]<-10;B2[which(B2>10)]<-10
+Logic.A1<-(sum(A1)>=31)
+Logic.B1<-(sum(B1)>=31)
+Logic.A2<-(sum(A2)>=31)
+Logic.B2<-(sum(B2)>=31)
+LogicTotal<-(Logic.A1|Logic.B1|Logic.A2|Logic.B2)
+#
+juego3<-data.frame(juego.A1=sum(A1),juego.B1=sum(B1),juego.A2=sum(A2),juego.B2=sum(B2),J=LogicTotal)
+juego.df<-rbind.data.frame(juego.df,juego3)
+#
+# Reparto 4: 
+#
+set.seed(2015);Reparto4<-c(sample(baraja,16,replace=FALSE))
+A1<-Reparto4[1:4]
+B1<-Reparto4[5:8]
+A2<-Reparto4[9:12]
+B2<-Reparto4[13:16]
+A1[which(A1>10)]<-10;B1[which(B1>10)]<-10;A2[which(A2>10)]<-10;B2[which(B2>10)]<-10
+Logic.A1<-(sum(A1)>=31)
+Logic.B1<-(sum(B1)>=31)
+Logic.A2<-(sum(A2)>=31)
+Logic.B2<-(sum(B2)>=31)
+LogicTotal<-(Logic.A1|Logic.B1|Logic.A2|Logic.B2)
+#
+juego4<-data.frame(juego.A1=sum(A1),juego.B1=sum(B1),juego.A2=sum(A2),juego.B2=sum(B2),J=LogicTotal)
+juego.df<-rbind.data.frame(juego.df,juego4);
+juego.df
+#
+##############################################################
+#
+#RNGkind(sample.kind = "Rounding")
